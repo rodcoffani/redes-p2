@@ -1,4 +1,5 @@
 import asyncio
+from grader.tcputils import *
 from tcputils import *
 
 
@@ -33,25 +34,30 @@ class Servidor:
 
         if (flags & FLAGS_SYN) == FLAGS_SYN:
             # A flag SYN estar setada significa que é um cliente tentando estabelecer uma conexão nova
-            # TODO: talvez você precise passar mais coisas para o construtor de conexão
-            conexao = self.conexoes[id_conexao] = Conexao(self, id_conexao)
+            conexao = self.conexoes[id_conexao] = Conexao(self, id_conexao, seq_no)
+            ack_no = seq_no + 1 # Como esse é o handshake, apenas para confirmar a conexão, soma-se 1 ao invés do tamanho do segmento
+            header = fix_checksum(make_header(dst_port, src_port, seq_no, ack_no, FLAGS_SYN + FLAGS_ACK), src_addr, dst_addr)
+            self.rede.enviar(header, src_addr) 
+
             # TODO: você precisa fazer o handshake aceitando a conexão. Escolha se você acha melhor
             # fazer aqui mesmo ou dentro da classe Conexao.
             if self.callback:
                 self.callback(conexao)
-            print(FLAGS_SYN + FLAGS_ACK)
         elif id_conexao in self.conexoes:
             # Passa para a conexão adequada se ela já estiver estabelecida
             self.conexoes[id_conexao]._rdt_rcv(seq_no, ack_no, flags, payload)
+
         else:
             print('%s:%d -> %s:%d (pacote associado a conexão desconhecida)' %
                   (src_addr, src_port, dst_addr, dst_port))
 
 
 class Conexao:
-    def __init__(self, servidor, id_conexao):
+    def __init__(self, servidor, id_conexao, seq_no):
         self.servidor = servidor
         self.id_conexao = id_conexao
+        self.seq_no = seq_no
+        self.ack_no = seq_no + 1
         self.callback = None
         self.timer = asyncio.get_event_loop().call_later(1, self._exemplo_timer)  # um timer pode ser criado assim; esta linha é só um exemplo e pode ser removida
         #self.timer.cancel()   # é possível cancelar o timer chamando esse método; esta linha é só um exemplo e pode ser removida
@@ -64,6 +70,14 @@ class Conexao:
         # TODO: trate aqui o recebimento de segmentos provenientes da camada de rede.
         # Chame self.callback(self, dados) para passar dados para a camada de aplicação após
         # garantir que eles não sejam duplicados e que tenham sido recebidos em ordem.
+        if (seq_no < self.ack_no):
+            return
+
+        self.ack_no = integer_val.to_bytes(seq_no, 'big') + payload
+        self.seq_no = ack_no
+        (dst_addr, dst_port, src_addr, src_port) = self.id_conexao
+        header = fix_checksum(make_header(src_port, dst_port, self.seq_no, self.ack_no, FLAGS_ACK), dst_addr, src_addr) 
+
         print('recebido payload: %r' % payload)
 
     # Os métodos abaixo fazem parte da API
