@@ -55,6 +55,7 @@ class Conexao:
         self.servidor = servidor
         self.id_conexao = id_conexao
         self.seq_no = seq_no
+        self.ack_no = seq_no + 1
         self.callback = None
         self.timer = asyncio.get_event_loop().call_later(1, self._exemplo_timer)  # um timer pode ser criado assim; esta linha é só um exemplo e pode ser removida
         #self.timer.cancel()   # é possível cancelar o timer chamando esse método; esta linha é só um exemplo e pode ser removida
@@ -67,6 +68,12 @@ class Conexao:
         # TODO: trate aqui o recebimento de segmentos provenientes da camada de rede.
         # Chame self.callback(self, dados) para passar dados para a camada de aplicação após
         # garantir que eles não sejam duplicados e que tenham sido recebidos em ordem.
+        src_addr, src_port, dst_addr, dst_port = self.id_conexao
+        if(self.ack_no == seq_no and len(payload) > 0):
+            self.callback(self, payload)
+            self.ack_no += len(payload)
+            header = fix_checksum(make_header(dst_port, src_port, self.seq_no, self.ack_no, FLAGS_ACK), dst_addr, src_addr)
+            self.servidor.rede.enviar(header, src_addr)
         print('recebido payload: %r' % payload)
 
     # Os métodos abaixo fazem parte da API
