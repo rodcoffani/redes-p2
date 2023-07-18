@@ -1,4 +1,5 @@
 import asyncio
+import math
 from tcputils import *
 
 
@@ -55,6 +56,7 @@ class Conexao:
         self.servidor = servidor
         self.id_conexao = id_conexao
         self.seq_no = seq_no
+        self.next_seq_no = seq_no + 1
         self.ack_no = seq_no + 1
         self.callback = None
         self.timer = asyncio.get_event_loop().call_later(1, self._exemplo_timer)  # um timer pode ser criado assim; esta linha é só um exemplo e pode ser removida
@@ -93,7 +95,16 @@ class Conexao:
         # Chame self.servidor.rede.enviar(segmento, dest_addr) para enviar o segmento
         # que você construir para a camada de rede.
 
-        pass
+        src_addr, src_port, dst_addr, dst_port = self.id_conexao
+
+        for i in range(math.ceil(len(dados) / MSS)):
+            header = make_header(dst_port, src_port, self.next_seq_no, self.ack_no, FLAGS_ACK)
+
+            payload = dados[i * MSS : (i + 1) * MSS]
+            segment = fix_checksum(header + payload,dst_addr, src_addr)
+            self.servidor.rede.enviar(segment, src_addr)
+            self.next_seq_no += len(payload)
+
 
     def fechar(self):
         """
