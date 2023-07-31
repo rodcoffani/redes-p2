@@ -59,10 +59,12 @@ class Conexao:
         self.next_seq_no = seq_no + 1
         self.ack_no = seq_no + 1
         self.callback = None
-        self.timer = asyncio.get_event_loop().call_later(1, self._exemplo_timer)  # um timer pode ser criado assim; esta linha é só um exemplo e pode ser removida
-        #self.timer.cancel()   # é possível cancelar o timer chamando esse método; esta linha é só um exemplo e pode ser removida
+        self.timer = None
+        self.timer_rodando = False
+        # self.timer = asyncio.get_event_loop().call_later(1, self._exemplo_timer)  # um timer pode ser criado assim; esta linha é só um exemplo e pode ser removida
+        # self.timer.cancel()   # é possível cancelar o timer chamando esse método; esta linha é só um exemplo e pode ser removida
 
-    def _exemplo_timer(self):
+    def handle_timeout(self):
         # Esta função é só um exemplo e pode ser removida
         print('Este é um exemplo de como fazer um timer')
 
@@ -74,10 +76,13 @@ class Conexao:
         
         print('recebido payload: %r' % payload)
 
-        if(self.ack_no == seq_no and len(payload) > 0):
-            self.callback(self, payload)
+        if (self.ack_no != seq_no ):
+            return
+
+        if(len(payload) > 0):
             self.ack_no += len(payload)
             header = fix_checksum(make_header(dst_port, src_port, self.seq_no, self.ack_no, FLAGS_ACK), dst_addr, src_addr)
+            self.callback(self, payload)
             self.servidor.rede.enviar(header, src_addr)
 
         if (flags & FLAGS_FIN) == FLAGS_FIN:
