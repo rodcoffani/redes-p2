@@ -59,12 +59,30 @@ class Conexao:
         self.next_seq_no = seq_no + 1
         self.ack_no = seq_no + 1
         self.callback = None
-        self.timer = asyncio.get_event_loop().call_later(1, self._exemplo_timer)  # um timer pode ser criado assim; esta linha é só um exemplo e pode ser removida
-        #self.timer.cancel()   # é possível cancelar o timer chamando esse método; esta linha é só um exemplo e pode ser removida
+        self.timer = None
+        self.timer_rodando = False
+        self.not_yet_acked = b''
+        # self.timer = asyncio.get_event_loop().call_later(1, self._exemplo_timer)  # um timer pode ser criado assim; esta linha é só um exemplo e pode ser removida
+        # self.timer.cancel()   # é possível cancelar o timer chamando esse método; esta linha é só um exemplo e pode ser removida
 
-    def _exemplo_timer(self):
-        # Esta função é só um exemplo e pode ser removida
-        print('Este é um exemplo de como fazer um timer')
+    # Lida com o timeout do timer
+    def handle_timeout(self):
+        # Cancelar o timer
+        self.timer.cancel()
+        self.timer_rodando = False
+        
+        # Criar o header
+        src_addr, src_port, dst_addr, dst_port = self.id_conexao
+        header = fix_checksum(make_header(dst_port, src_port, self.seq_no, self.ack_no, FLAGS_ACK), dst_addr, src_addr)
+
+        # Pega o payload a ser enviado
+        payload = self.not_yet_acked[:MSS]
+
+        # Envia o payload e reinicia o timer
+        self.servidor.rede.enviar(header + payload, src_addr)
+        self.timer = asyncio.get_event_loop().call_later(0.5, self.handle_timeout)
+        self.timer_rodando = True
+
 
     def _rdt_rcv(self, seq_no, ack_no, flags, payload):
         # TODO: trate aqui o recebimento de segmentos provenientes da camada de rede.
@@ -74,11 +92,8 @@ class Conexao:
         
         print('recebido payload: %r' % payload)
 
-        if(self.ack_no == seq_no and len(payload) > 0):
-            self.callback(self, payload)
-            self.ack_no += len(payload)
-            header = fix_checksum(make_header(dst_port, src_port, self.seq_no, self.ack_no, FLAGS_ACK), dst_addr, src_addr)
-            self.servidor.rede.enviar(header, src_addr)
+        if (self.ack_no != seq_no ):
+            return
 
         if (flags & FLAGS_FIN) == FLAGS_FIN:
             self.ack_no += 1
@@ -86,6 +101,32 @@ class Conexao:
             self.servidor.rede.enviar(header, src_addr)
             self.callback(self, b'')
             del self.servidor.conexoes[self.id_conexao]
+
+        self.ack_no += len(payload)
+        
+        if (len(payload) > 0):
+            header = fix_checksum(make_header(dst_port, src_port, self.seq_no, self.ack_no, FLAGS_ACK), dst_addr, src_addr)
+            self.callback(self, payload)
+            self.servidor.rede.enviar(header, src_addr)
+            return
+        
+        # Aqui, a len(payload) é sempre igual a 0
+        if ((flags & FLAGS_ACK) == FLAGS_ACK):
+            if self.timer_rodando:
+                self.timer.cancel()
+                self.timer = None
+                self.timer_rodando = False
+
+            # Remove do buffer os pacotes já recebidos
+            self.not_yet_acked = self.not_yet_acked[ack_no - self.seq_no :]
+            self.seq_no = ack_no
+            
+            if ack_no < self.next_seq_no:
+                # Ainda há pacotes a serem recebidos, inicia o timer
+                self.timer_rodando = True
+                self.timer = asyncio.get_event_loop().call_later(0.5, self.handle_timeout)
+
+            return
 
 
     # Os métodos abaixo fazem parte da API
@@ -114,6 +155,12 @@ class Conexao:
             segment = fix_checksum(header + payload,dst_addr, src_addr)
             self.servidor.rede.enviar(segment, src_addr)
             self.next_seq_no += len(payload)
+            
+            self.not_yet_acked += payload
+            # Se o timer não estiver rodando, inicia ele
+            if not self.timer_rodando:
+                self.timer_rodando = True
+                self.timer = asyncio.get_event_loop().call_later(0.5, self.handle_timeout)
 
 
     def fechar(self):
